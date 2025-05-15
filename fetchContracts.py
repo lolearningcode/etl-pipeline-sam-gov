@@ -127,6 +127,16 @@ def upload_to_s3(local_file, bucket_name, s3_key):
     s3.upload_file(local_file, bucket_name, s3_key)
     print(f"✅ Uploaded {local_file} to s3://{bucket_name}/{s3_key}")
 
+def start_glue_crawler(crawler_name):
+    glue = boto3.client("glue")
+    try:
+        glue.start_crawler(Name=crawler_name)
+        print(f"🚀 Glue crawler '{crawler_name}' triggered.")
+    except glue.exceptions.CrawlerRunningException:
+        print(f"⚠️ Crawler '{crawler_name}' is already running.")
+    except Exception as e:
+        print(f"❌ Failed to start crawler: {e}")
+        
 def ensure_bucket_exists(bucket_name, region="us-east-1"):
     s3 = boto3.client("s3", region_name=region)
     try:
