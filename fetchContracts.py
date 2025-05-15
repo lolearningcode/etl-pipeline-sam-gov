@@ -2,18 +2,21 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
+# 🔐 Configuration
 API_KEY = "Xs0vOAUZrmo13Tg5kiWeDUdTDka8z8oIsxTynPnQ"
 BASE_URL = "https://api.sam.gov/prod/opportunities/v2/search"
 KEYWORD = "software"
 DAYS_BACK = 5
 LIMIT = 100
-MAX_RECORDS = 500  
+MAX_RECORDS = 500
 
+# 📆 Date Range Helper
 def get_date_range():
     today = datetime.now()
     past = today - timedelta(days=DAYS_BACK)
     return past.strftime('%m/%d/%Y'), today.strftime('%m/%d/%Y')
 
+# 🌐 Fetch from API
 def fetch_all_results():
     posted_from, posted_to = get_date_range()
     all_results = []
@@ -30,7 +33,7 @@ def fetch_all_results():
         }
 
         print(f"Fetching records {offset}–{offset + LIMIT}...")
-        resp = requests.get(BASE_URL, params=params)
+        resp = requests.get(BASE_URL, params=params, timeout=10)
         if resp.status_code != 200:
             print("Error:", resp.status_code, resp.text)
             break
@@ -44,8 +47,9 @@ def fetch_all_results():
 
         offset += LIMIT
 
-    return all_results[:MAX_RECORDS]  # truncate just in case
+    return all_results[:MAX_RECORDS]
 
+# 🎯 Filter for Veteran-Owned Set-Asides
 def filter_veteran_set_asides(data):
     veteran_keywords = ["Veteran-Owned", "Service-Disabled Veteran-Owned"]
     return [
@@ -54,29 +58,69 @@ def filter_veteran_set_asides(data):
         and any(keyword in opp["typeOfSetAsideDescription"] for keyword in veteran_keywords)
     ]
 
-def flatten_opps(opps):
-    # Flatten for DataFrame conversion
-    return [
+# 🔄 Transform & Enrich Data
+def transform_opportunities(opps):
+    flattened = [
         {
             "noticeId": o.get("noticeId"),
-            "title": o.get("title"),
-            "solicitationNumber": o.get("solicitationNumber"),
-            "agency": o.get("fullParentPathName"),
+            "title": o.get("title", "").strip(),
+            "solicitationNumber": o.get("solicitationNumber", "").strip(),
+            "agency": o.get("fullParentPathName", "").strip(),
             "postedDate": o.get("postedDate"),
-            "typeOfSetAside": o.get("typeOfSetAsideDescription"),
-            "naicsCode": o.get("naicsCode"),
-            "city": o.get("officeAddress", {}).get("city"),
-            "state": o.get("officeAddress", {}).get("state"),
-            "link": o.get("uiLink")
+            "setAside": o.get("typeOfSetAsideDescription", "").strip(),
+            "naicsCode": o.get("naicsCode", "").strip(),
+            "city": o.get("officeAddress", {}).get("city", "").strip(),
+            "state": o.get("officeAddress", {}).get("state", "").strip(),
+            "link": o.get("uiLink", "").strip()
         }
         for o in opps
     ]
 
-def save_to_parquet(data, filename="veteran_contracts.parquet"):
-    df = pd.DataFrame(flatten_opps(data))
-    df.to_parquet(filename, engine='pyarrow')
-    print(f"Saved {len(df)} records to {filename}")
+    df = pd.DataFrame(flattened)
 
+    # 🧼 Clean
+    df = df.dropna(subset=["noticeId", "title", "postedDate"])
+    df["postedDate"] = pd.to_datetime(df["postedDate"], errors="coerce")
+    df["daysSincePosted"] = (pd.Timestamp.now() - df["postedDate"]).dt.days
+    df["isRecent"] = df["daysSincePosted"] <= 7
+    df["hasNAICS"] = df["naicsCode"].apply(lambda x: bool(x and x.strip()))
+    df["state"] = df["state"].str.upper()
+
+    # 🧾 Map NAICS
+    naics_map = {
+        "541511": "Custom Computer Programming",
+        "541512": "Systems Design Services",
+        "561730": "Landscaping Services"
+    }
+    df["naicsDescription"] = df["naicsCode"].map(naics_map).fillna("Other")
+
+    # 🏅 Add Recency Score
+    def recency_score(days):
+        if days <= 1:
+            return 5
+        elif days <= 3:
+            return 4
+        elif days <= 5:
+            return 3
+        elif days <= 7:
+            return 2
+        else:
+            return 1
+
+    df["recencyScore"] = df["daysSincePosted"].apply(recency_score)
+
+    # 📊 Sort by score and date
+    df = df.sort_values(by=["recencyScore", "postedDate"], ascending=[False, False])
+
+    return df
+
+# 💾 Save to Parquet
+def save_to_parquet(opps, filename="veteran_contracts.parquet"):
+    df = transform_opportunities(opps)
+    df.to_parquet(filename, engine='pyarrow')
+    print(f"\n✅ Saved {len(df)} transformed records to {filename}")
+
+# 📋 Print to Console
 def print_opportunities(opps):
     for i, opp in enumerate(opps, 1):
         print(f"\n🔹 Opportunity #{i}")
@@ -90,11 +134,12 @@ def print_opportunities(opps):
         print(f"Link: {opp.get('uiLink')}")
         print("-" * 60)
 
-# 🔁 Run the pipeline
-all_opps = fetch_all_results()
-veteran_opps = filter_veteran_set_asides(all_opps)
+# 🚀 Run ETL Pipeline
+if __name__ == "__main__":
+    all_opps = fetch_all_results()
+    veteran_opps = filter_veteran_set_asides(all_opps)
 
-print(f"\n✅ Total veteran-related opportunities: {len(veteran_opps)}")
-print_opportunities(veteran_opps)
+    print(f"\n✅ Total veteran-related opportunities: {len(veteran_opps)}")
+    print_opportunities(veteran_opps)
 
-save_to_parquet(veteran_opps)
+    save_to_parquet(veteran_opps)
