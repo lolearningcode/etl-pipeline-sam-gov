@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import boto3
 
 # 🔐 Configuration
 API_KEY = "Xs0vOAUZrmo13Tg5kiWeDUdTDka8z8oIsxTynPnQ"
@@ -9,6 +10,8 @@ KEYWORD = "software"
 DAYS_BACK = 5
 LIMIT = 100
 MAX_RECORDS = 500
+S3_BUCKET = "cleo-samgov-etl"
+S3_KEY = "contracts/veteran_contracts.parquet"
 
 # 📆 Date Range Helper
 def get_date_range():
@@ -108,8 +111,6 @@ def transform_opportunities(opps):
             return 1
 
     df["recencyScore"] = df["daysSincePosted"].apply(recency_score)
-
-    # 📊 Sort by score and date
     df = df.sort_values(by=["recencyScore", "postedDate"], ascending=[False, False])
 
     return df
@@ -119,6 +120,31 @@ def save_to_parquet(opps, filename="veteran_contracts.parquet"):
     df = transform_opportunities(opps)
     df.to_parquet(filename, engine='pyarrow')
     print(f"\n✅ Saved {len(df)} transformed records to {filename}")
+
+# 📤 Upload to S3
+def upload_to_s3(local_file, bucket_name, s3_key):
+    s3 = boto3.client("s3")
+    s3.upload_file(local_file, bucket_name, s3_key)
+    print(f"✅ Uploaded {local_file} to s3://{bucket_name}/{s3_key}")
+
+def ensure_bucket_exists(bucket_name, region="us-east-1"):
+    s3 = boto3.client("s3", region_name=region)
+    try:
+        s3.head_bucket(Bucket=bucket_name)
+        print(f"✅ Bucket '{bucket_name}' already exists.")
+    except boto3.exceptions.botocore.exceptions.ClientError as e:
+        error_code = int(e.response['Error']['Code'])
+        if error_code == 404:
+            print(f"🪣 Creating bucket: {bucket_name}")
+            if region == "us-east-1":
+                s3.create_bucket(Bucket=bucket_name)
+            else:
+                s3.create_bucket(
+                    Bucket=bucket_name,
+                    CreateBucketConfiguration={"LocationConstraint": region}
+                )
+        else:
+            raise
 
 # 📋 Print to Console
 def print_opportunities(opps):
@@ -142,4 +168,11 @@ if __name__ == "__main__":
     print(f"\n✅ Total veteran-related opportunities: {len(veteran_opps)}")
     print_opportunities(veteran_opps)
 
+    # Save locally
     save_to_parquet(veteran_opps)
+
+    # Ensure bucket exists
+    ensure_bucket_exists(S3_BUCKET)
+
+    # Upload to S3
+    upload_to_s3("veteran_contracts.parquet", S3_BUCKET, S3_KEY)
