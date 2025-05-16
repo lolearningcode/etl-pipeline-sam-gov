@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
-from datetime import datetime, time, timedelta
+import time
+from datetime import datetime, timedelta
 import boto3
 
 # 🔐 Configuration
@@ -116,16 +117,15 @@ def transform_opportunities(opps):
     return df
 
 # 💾 Save to Parquet
-def save_to_parquet(opps, filename="veteran_contracts.parquet"):
+def save_to_parquet(opps, filename="/tmp/veteran_contracts.parquet"):
     df = transform_opportunities(opps)
     df.to_parquet(filename, engine='pyarrow')
     print(f"\n✅ Saved {len(df)} transformed records to {filename}")
 
-# 📤 Upload to S3
-def upload_to_s3(local_file, bucket_name, s3_key):
-    s3 = boto3.client("s3")
+s3 = boto3.client("s3")
+def upload_to_s3(local_file="/tmp/veteran_contracts.parquet", bucket_name=S3_BUCKET, s3_key=S3_KEY):
     s3.upload_file(local_file, bucket_name, s3_key)
-    print(f"✅ Uploaded {local_file} to s3://{bucket_name}/{s3_key}")
+    print(f"📤 Uploaded {local_file} to s3://{bucket_name}/{s3_key}")
 
 def start_glue_crawler(crawler_name):
     glue = boto3.client("glue")
@@ -218,7 +218,7 @@ def lambda_handler(event=None, context=None):
     ensure_bucket_exists(S3_BUCKET)
 
     # Upload to S3
-    upload_to_s3("veteran_contracts.parquet", S3_BUCKET, S3_KEY)
+    upload_to_s3()
 
     # Trigger Glue Crawler
     start_glue_crawler("samgov-crawler")

@@ -1,6 +1,34 @@
+# Virtual environments
 venv/
+.env/
+
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Parquet files and data exports
 *.parquet
+*.csv
+athena-results/
 *.zip
+
+# Docker + Lambda build artifacts
 python/
+*.egg-info/
+build/
+dist/
 .DS_Store
+
+# AWS credentials or config
+*.pem
+.aws/
+*.env
+
+# Logs and test output
+*.log
+
+# VSCode/IDE files
+.vscode/
+.idea/
